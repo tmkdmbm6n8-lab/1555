@@ -7,7 +7,7 @@ import { configSchema, requestSchema } from "./business-schema";
 import { z } from "zod";
 import { defaultConfig, estimate, type BusinessConfig } from "./business";
 import { priceConfiguration } from "./configurator";
-import { geocodeAddress, haversineKm } from "./travel-distance";
+import { geocodeAddress, haversineKm } from "./configurator";
 import { applyDiscount, codePattern, normalizeCode, totalPercent } from "./discounts";
 import { themeColorsSchema, elementKeySchema, elementColorSchema, placedMediaSchema } from "./site-colors";
 import { availabilityRangeSchema, generateAvailability } from "./availability-range";
