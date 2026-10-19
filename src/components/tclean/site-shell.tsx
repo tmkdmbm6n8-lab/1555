@@ -17,7 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { businessQuery } from "@/lib/business-query";
 import { telephone } from "@/lib/business";
-import { useReviewRedirect, useUnread } from "./contact-inbox";
+import { useReviewRedirect, useUnread, trackAdminPresence } from "./contact-inbox";
 import { SeasonalTheme, SeasonalLogoHat } from "./seasonal-theme";
 
 const baseNav = [
@@ -96,12 +96,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isAdmin) return;
-    const channel = supabase.channel("tclean-admin-presence", { config: { presence: { key: "admin-viewer" } } });
-    const track = () => channel.track({ role: "admin", online: document.visibilityState === "visible", at: new Date().toISOString() }).catch(() => {});
-    channel.subscribe((status) => { if (status === "SUBSCRIBED") track(); });
-    const onVisibility = () => track();
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => { document.removeEventListener("visibilitychange", onVisibility); supabase.removeChannel(channel); };
+    return trackAdminPresence();
   }, [isAdmin, userId]);
 
   const logout = async () => {
