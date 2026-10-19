@@ -12,7 +12,7 @@ import {
   updateButtonLink,
   permanentlyDeleteHidden,
 } from "@/lib/business.functions";
-import { elementColorKey } from "@/lib/site-colors";
+import { elementColorKey, siteColorCss, type ElementColors } from "@/lib/site-colors";
 import { HIDEABLE, hideKey, parseInfo } from "@/lib/editor-history";
 import { SiteColorEditor, readElementColors, type ColorTarget } from "./site-color-editor";
 import { EditorTypographyToolbar } from "./site-typography-toolbar";
@@ -60,6 +60,22 @@ type PendingMove = {
   element: HTMLElement;
 };
 
+type OverrideData = NonNullable<Parameters<typeof saveSiteSetting>[0]>["data"];
+type ColorsData = NonNullable<Parameters<typeof saveSiteColor>[0]>["data"];
+type PermDeleteData = NonNullable<Parameters<typeof permanentlyDeleteHidden>[0]>["data"];
+type LinkData = NonNullable<Parameters<typeof updateButtonLink>[0]>["data"];
+
+// Modification mise en attente : rien n'est envoyé au serveur avant « Enregistrer »
+type PendingBody =
+  | { type: "override"; data: OverrideData }
+  | { type: "perm"; data: PermDeleteData }
+  | { type: "link"; data: LinkData }
+  | { type: "colors"; data: ColorsData };
+
+type PendingOp = PendingBody & { id: string; label: string };
+
+const PENDING_KEY = "tc-editor-pending-ops";
+
 export function SiteEditor() {
   const { data: c } = useSuspenseQuery(businessQuery);
 
@@ -91,6 +107,7 @@ export function SiteEditor() {
   const [moveAlign, setMoveAlign] = useState<"left" | "center" | "right">("center");
 
   const [colorTarget, setColorTarget] = useState<ColorTarget | "theme" | null>(null);
+  const [pendingOps, setPendingOps] = useState<PendingOp[]>([]);
   const [isPending, startTransition] = useTransition();
 
   const pathname = useRouterState({
@@ -280,15 +297,58 @@ export function SiteEditor() {
     return null;
   };
 
-  const run = (fn: () => Promise<unknown>) => {
+  useEffect(() => {
+    try {
+      const stored = window.sessionStorage.getItem(PENDING_KEY);
+      if (stored) setPendingOps(JSON.parse(stored) as PendingOp[]);
+    } catch {
+      // Ignore invalid stored data.
+    }
+  }, []);
+
+  const writePending = (next: PendingOp[]) => {
+    setPendingOps(next);
+    if (next.length > 0) window.sessionStorage.setItem(PENDING_KEY, JSON.stringify(next));
+    else window.sessionStorage.removeItem(PENDING_KEY);
+  };
+
+  const stage = (label: string, body: PendingBody) => {
+    writePending([...pendingOps, { ...body, id: crypto.randomUUID(), label }]);
+  };
+
+  const applyOp = (op: PendingOp) => {
+    switch (op.type) {
+      case "override":
+        return save({ data: op.data });
+      case "perm":
+        return permDelete({ data: op.data });
+      case "link":
+        return linkRedirect({ data: op.data });
+      case "colors":
+        return saveColors({ data: op.data });
+    }
+  };
+
+  const saveAll = () => {
     startTransition(async () => {
+      let remaining = [...pendingOps];
       try {
-        await fn();
+        while (remaining.length > 0) {
+          await applyOp(remaining[0]);
+          remaining = remaining.slice(1);
+          writePending(remaining);
+        }
+        toast.success("Modifications enregistrées pour tout le monde.");
         navigate({ reloadDocument: true });
       } catch (e) {
         toast.error((e as Error).message || "Erreur d'enregistrement");
       }
     });
+  };
+
+  const discardAll = () => {
+    writePending([]);
+    navigate({ reloadDocument: true });
   };
 
   const mediaKey = (el: HTMLElement): string => {
@@ -365,36 +425,28 @@ export function SiteEditor() {
         const label = (el.textContent ?? "").trim().slice(0, 40) || el.tagName.toLowerCase();
 
         if (mode === "permanent-delete") {
-          void run(() =>
-            permDelete({
-              data: {
-                key,
-                label,
-                page: pathname,
-              },
-            }),
-          );
-          toast.success(`Élément « ${label} » supprimé définitivement`);
+          stage(`Suppression définitive — ${label}`, { type: "perm", data: { key } });
+          toast.success(`Élément « ${label} » ajouté aux modifications en attente`);
           return;
         }
 
-        const next = { ...hidden };
-        next[key] = JSON.stringify({
-          label,
-          page: pathname,
-          at: new Date().toISOString(),
-          audience,
+        stage(`Masquer — ${label}`, {
+          type: "override",
+          data: {
+            kind: "hide",
+            key,
+            value: JSON.stringify({
+              label,
+              page: pathname,
+              at: new Date().toISOString(),
+              audience,
+            }),
+            audience,
+          },
         });
+        el.style.setProperty("display", "none", "important");
 
-        void run(() =>
-          save({
-            data: {
-              hidden: next,
-            },
-          }),
-        );
-
-        toast.success(`Élément masqué (${audience === "all" ? "tout le monde" : audience})`);
+        toast.success(`Élément masqué en attente (${audience === "all" ? "tout le monde" : audience})`);
         return;
       }
 
@@ -454,7 +506,22 @@ export function SiteEditor() {
     return () => {
       document.removeEventListener("click", onClick, true);
     };
-  }, [enabled, mode, audience, pathname, hidden, permanentHidden, allHidden, c.elementColors, permDelete, save]);
+  }, [enabled, mode, audience, pathname, hidden, permanentHidden, allHidden, c.elementColors, stage]);
+
+  // Aperçu des couleurs en attente (sans les enregistrer)
+  const stagedColorCss = (() => {
+    let theme = { ...(c.themeColors ?? {}) } as Record<string, string>;
+    const elements = { ...(c.elementColors ?? {}) } as Record<string, ElementColors>;
+    let touched = false;
+    for (const op of pendingOps) {
+      if (op.type !== "colors") continue;
+      touched = true;
+      if (op.data.kind === "theme") theme = { ...(op.data.colors as Record<string, string>) };
+      else if (op.data.colors === null) delete elements[op.data.key];
+      else elements[op.data.key] = op.data.colors;
+    }
+    return touched ? siteColorCss(theme, elements, pathname) : "";
+  })();
 
   // Si on est à l'intérieur de l'iframe de simulation ou si l'utilisateur n'est pas admin, on n'affiche rien
   const isInsideIframe = typeof window !== "undefined" && window.self !== window.top;
@@ -477,6 +544,8 @@ export function SiteEditor() {
 
   return (
     <>
+      {stagedColorCss && <style>{stagedColorCss}</style>}
+
       {/* Vrai simulateur avec iframe isolée (déclenche les vrais media queries mobiles) */}
       {enabled && deviceView !== "desktop" && (
         <aside className="tc-device-simulator-overlay" aria-label="Simulateur responsive">
@@ -791,20 +860,34 @@ export function SiteEditor() {
                     type="button"
                     className="tc-phone-pending-confirm"
                     onClick={() => {
-                      void run(() =>
-                        linkRedirect({
-                          data: {
-                            key: pending.key,
-                            target: pathname,
-                          },
-                        }),
-                      );
+                      stage(`Redirection — ${pending.label}`, {
+                        type: "link",
+                        data: { key: pending.key, target: pathname },
+                      });
                       choosePending(null);
                     }}
                   >
                     <ArrowUpRight size={13} /> Rediriger vers {pathname}
                   </button>
                   <button type="button" className="tc-phone-pending-cancel" onClick={() => choosePending(null)}>
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Modifications en attente : publiées seulement après « Enregistrer » */}
+            {pendingOps.length > 0 && (
+              <div className="tc-phone-pending-banner">
+                <div className="tc-phone-pending-copy">
+                  <span>Modifications en attente : {pendingOps.length}</span>
+                  <strong>{pendingOps.map((op) => op.label).slice(-3).join(" · ")}</strong>
+                </div>
+                <div className="tc-phone-pending-actions">
+                  <button type="button" className="tc-phone-pending-confirm" disabled={isPending} onClick={saveAll}>
+                    {isPending ? "Enregistrement…" : "Enregistrer pour tout le monde"}
+                  </button>
+                  <button type="button" className="tc-phone-pending-cancel" disabled={isPending} onClick={discardAll}>
                     Annuler
                   </button>
                 </div>
@@ -851,7 +934,13 @@ export function SiteEditor() {
       {enabled && mode === "typography" && <EditorTypographyToolbar audience={audience} />}
 
       {enabled && mode === "colors" && colorTarget && (
-        <SiteColorEditor config={c} pathname={pathname} target={colorTarget} onClose={() => setColorTarget(null)} />
+        <SiteColorEditor
+          config={c}
+          pathname={pathname}
+          target={colorTarget}
+          onClose={() => setColorTarget(null)}
+          onStage={(data, label) => stage(label, { type: "colors", data })}
+        />
       )}
     </>
   );
