@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { BusinessConfig } from './business';
 import { defaultConfig, travelCharge } from './business';
+import { farTravelFee } from './travel-distance';
 
 export type FurnitureType = 'sofa2' | 'sofa3' | 'sofa4' | 'angleLeft' | 'angleRight' | 'panoramic' | 'convertible' | 'armchair' | 'meridienne' | 'mattress1' | 'mattress2' | 'chair' | 'sofa5' | 'pouf' | 'cushion';
 
@@ -87,7 +88,7 @@ export function chairLotPrice(p: typeof defaultConfig.configuratorPrices, qty: n
   if (p.chair8 == null || restPrice == null) return null;
   return lots * p.chair8 + restPrice;
 }
-export function priceConfiguration(c: BusinessConfig, cfg: Configuration) {
+export function priceConfiguration(c: BusinessConfig, cfg: Configuration, distanceKm?: number | null) {
   const p = { ...defaultConfig.configuratorPrices, ...(c.configuratorPrices ?? {}) } as typeof defaultConfig.configuratorPrices;
   const info = typeInfo(cfg.type);
   const from = cfg.type === 'angleLeft' || cfg.type === 'angleRight' || cfg.type === 'meridienne' || cfg.type === 'panoramic';
@@ -109,7 +110,7 @@ export function priceConfiguration(c: BusinessConfig, cfg: Configuration) {
   if (deco) lines.push({ label: 'Coussins décoratifs supplémentaires', quantity: deco, unit: p.decoCushion ?? null });
   const complete = lines.every(l => l.unit !== null);
   const subtotal = lines.reduce((sum, l) => sum + (l.unit ?? 0) * (l.label.startsWith('Chaises supplémentaires') ? 1 : l.quantity), 0);
-  const travelFee = travelCharge(c, complete ? subtotal : null);
+  const travelFee = complete ? (farTravelFee(distanceKm) ?? travelCharge(c, subtotal)) : null;
   const total = complete ? Math.round(Math.max(subtotal + (travelFee ?? 0), c.minimum ?? 0) * 100) / 100 : null;
   return { lines, total, travelFee, needsCheck: fabrics.find(f => f.id === cfg.fabric)?.check || cfg.soil === 'heavy' || cfg.stains || cfg.odors };
 }
