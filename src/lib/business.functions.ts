@@ -7,6 +7,7 @@ import { configSchema, requestSchema } from "./business-schema";
 import { z } from "zod";
 import { defaultConfig, estimate, type BusinessConfig } from "./business";
 import { priceConfiguration } from "./configurator";
+import { geocodeAddress, haversineKm } from "./travel-distance";
 import { applyDiscount, codePattern, normalizeCode, totalPercent } from "./discounts";
 import { themeColorsSchema, elementKeySchema, elementColorSchema, placedMediaSchema } from "./site-colors";
 import { availabilityRangeSchema, generateAvailability } from "./availability-range";
@@ -132,8 +133,14 @@ export const submitRequest = createServerFn({ method: "POST" })
         if (result.error) throw new Error("Impossible de joindre la photo.");
         paths.push(path);
       }
+      let distanceKm: number | null = null;
+      if (data.details.configurator) {
+        const point = await geocodeAddress(`${data.address} ${data.postal_code} ${data.city}`.trim()).catch(() => null);
+        if (!point) throw new Error("Adresse introuvable. Vérifiez votre adresse pour calculer les frais de déplacement.");
+        distanceKm = haversineKm(point.lon, point.lat);
+      }
       const base = data.details.configurator
-        ? priceConfiguration(config as unknown as BusinessConfig, data.details.configurator).total
+        ? priceConfiguration(config as unknown as BusinessConfig, data.details.configurator, distanceKm).total
         : estimate(config as unknown as BusinessConfig, data.details.service, data.details.quantity);
       const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
       let userId: string | null = null;
