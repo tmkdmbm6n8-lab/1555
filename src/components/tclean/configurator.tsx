@@ -10,6 +10,7 @@ import { checkDiscount, getClientData, getSlots, profileComplete, submitRequest 
 import { ACCOUNT_DISCOUNT, PROFILE_DISCOUNT, applyDiscount, totalPercent } from '@/lib/discounts';
 import { supabase } from '@/integrations/supabase/client';
 import { paymentsConfigured } from '@/lib/stripe';
+import { geocodeAddress, haversineKm } from '@/lib/travel-distance';
 import { RequestCheckout } from './checkout';
 import { armLabels, availableTypes, colors, defaultConfiguration, fabrics, forType, furnitureTypes, priceConfiguration, soilLabels, summarize, typeInfo, type Configuration } from '@/lib/configurator';
 import { FurniturePhoto } from './furniture-photo';
@@ -31,6 +32,7 @@ function Compare({ cfg }: { cfg: Configuration }) {
 export function Configurator() {
   const { data: c } = useSuspenseQuery(businessQuery); const submit = useServerFn(submitRequest); const loadSlots = useServerFn(getSlots);
   const [slots, setSlots] = useState<Awaited<ReturnType<typeof getSlots>>>([]); const [slotsLoading, setSlotsLoading] = useState(true); const [slotId, setSlotId] = useState(''); const [address, setAddress] = useState('');
+  const [distanceKm, setDistanceKm] = useState<number | null>(null);
   const types = availableTypes(c);
   const { mobilier } = useSearch({ from: '/configurateur' });
   useEffect(() => { const chosen = types.find(t => t.id === mobilier); if (chosen) { setCfg(forType(defaultConfiguration, chosen.id)); setStep(0); } }, [mobilier]);
@@ -68,8 +70,18 @@ export function Configurator() {
       }));
     } catch { /* Le devis reste utilisable si le stockage de session est indisponible. */ }
   }, [cfg, form.postal_code, form.city, address]);
+  useEffect(() => {
+    if (!address.trim() || !/^\d{5}$/.test(form.postal_code)) { setDistanceKm(null); return; }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      geocodeAddress(`${address} ${form.postal_code} ${form.city}`.trim())
+        .then(point => { if (!cancelled) setDistanceKm(point ? haversineKm(point.lon, point.lat) : null); })
+        .catch(() => { if (!cancelled) setDistanceKm(null); });
+    }, 600);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [address, form.postal_code, form.city]);
   const set = <K extends keyof Configuration>(k: K, v: Configuration[K]) => setCfg(p => ({ ...p, [k]: v }));
-  const info = typeInfo(cfg.type); const sofa = info.family === 'sofa'; const price = priceConfiguration(c, cfg); const percent = totalPercent(signedIn, code?.percent ?? 0, profileDone); const finalTotal = applyDiscount(price.total, percent);
+  const info = typeInfo(cfg.type); const sofa = info.family === 'sofa'; const price = priceConfiguration(c, cfg, distanceKm); const percent = totalPercent(signedIn, code?.percent ?? 0, profileDone); const finalTotal = applyDiscount(price.total, percent);
   const num = (k: 'seatCushions' | 'backCushions' | 'extraArmchairs' | 'extraChairs' | 'width', label: string, min: number, max: number) => <div className="field"><label htmlFor={`cfg-${k}`}>{label}</label><input id={`cfg-${k}`} type="number" min={min} max={max} value={cfg[k]} onChange={e => set(k, Math.min(max, Math.max(min, Number(e.target.value) || 0)))} /></div>;
   const toggle = (k: 'decorative' | 'pouf' | 'stains' | 'odors' | 'pets' | 'removable', label: string) => <label className="choice-label"><input type="checkbox" checked={cfg[k]} onChange={e => set(k, e.target.checked)} />{label}</label>;
   const priceText = finalTotal === null ? 'Tarif communiqué par TClean au rendez-vous' : `${finalTotal.toLocaleString('fr-FR')} € TTC — Prix final TTC`;
@@ -121,7 +133,7 @@ export function Configurator() {
         {step === 4 && <p>Faites glisser le curseur sur l’illustration pour comparer. Le résultat réel dépend du textile, de l’ancienneté et de la nature des taches : certaines peuvent ne pas disparaître entièrement.</p>}
         {step === 5 && <><div className="field"><label htmlFor="cfg-soil">État général</label><select id="cfg-soil" value={cfg.soil} onChange={e => set('soil', e.target.value as Configuration['soil'])}>{Object.entries(soilLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div><div className="choice-grid">{toggle('stains', 'Taches visibles')}{toggle('odors', 'Odeurs')}{toggle('pets', 'Poils d’animaux')}{toggle('removable', 'Coussins amovibles')}</div></>}
         {step === 6 && <><dl className="recap">{price.lines.map(l => <div key={l.label}><dt>{l.label}{l.label.startsWith('Chaises') ? '' : ` × ${l.quantity}`}</dt><dd>{l.unit === null ? 'Sur devis' : `${l.from ? 'À partir de ' : ''}${(l.unit * (l.label.startsWith('Chaises') ? 1 : l.quantity)).toLocaleString('fr-FR')} € TTC`}</dd></div>)}{price.travelFee !== null && price.travelFee > 0 ? <div><dt>Déplacement</dt><dd>{price.travelFee} € TTC</dd></div> : null}<div><dt>Temps de séchage</dt><dd>Entre 12 et 24 h</dd></div>{signedIn && <div><dt>Réduction compte client</dt><dd>-{ACCOUNT_DISCOUNT} %</dd></div>}{profileDone && <div><dt>Profil complet</dt><dd>-{PROFILE_DISCOUNT} %</dd></div>}{code && <div><dt>Code {code.code}</dt><dd>-{code.percent} %</dd></div>}<div><dt>Prix final TTC</dt><dd><strong>{finalTotal === null ? 'Tarif communiqué par TClean au rendez-vous' : `${finalTotal.toLocaleString('fr-FR')} € TTC`}</strong></dd></div></dl>{discountBox}{price.needsCheck && <div className="notice">Montant à confirmer après vérification de l’état réel et du textile.</div>}</>}
-        {step === 7 && <><div className="cfg-summary"><FurniturePhoto cfg={cfg} dirty className="cfg-mini" /><p>{summarize(cfg)}{cfg.width ? ` · ${cfg.width} cm` : ''}<br /><strong>{priceText}</strong></p></div>
+        {step === 7 && <><div className="cfg-summary"><FurniturePhoto cfg={cfg} dirty className="cfg-mini" /><p>{summarize(cfg)}{cfg.width ? ` · ${cfg.width} cm` : ''}<br /><strong>{priceText}</strong>{price.travelFee ? <><br />Dont déplacement : {price.travelFee} € TTC</> : null}</p></div>
           <div className="sr-honeypot" aria-hidden="true"><label>Site internet<input tabIndex={-1} value={form.honeypot} onChange={e => setForm({ ...form, honeypot: e.target.value })} autoComplete="off" /></label></div>
           <div className="field"><label>Date et heure *</label>{slotsLoading ? <p>Chargement des disponibilités…</p> : slots.length ? <BookingCalendar slots={slots} value={slotId} onChange={setSlotId} /> : <div className="notice">Aucune date disponible pour le moment. Appelez le {c.phone}.</div>}</div>
           <div className="field-grid">{([['customer_name', 'Prénom et nom', 'name', 'text'], ['phone', 'Téléphone', 'tel', 'tel'], ['email', 'Adresse e-mail', 'email', 'email'], ['postal_code', 'Code postal', 'postal-code', 'text'], ['city', 'Ville', 'address-level2', 'text']] as const).map(([k, l, ac, ty]) => <div className="field" key={k}><label htmlFor={`cf-${k}`}>{l} *</label><input id={`cf-${k}`} type={ty} required autoComplete={ac} inputMode={k === 'postal_code' ? 'numeric' : undefined} maxLength={k === 'postal_code' ? 5 : 200} value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} /></div>)}</div>
