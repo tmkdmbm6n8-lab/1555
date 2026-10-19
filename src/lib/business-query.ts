@@ -1,0 +1,69 @@
+import { queryOptions } from '@tanstack/react-query';
+import { getBusiness } from './business.functions';
+import { defaultConfig, type BusinessConfig } from './business';
+import salon from '@/assets/tclean-salon.jpg';
+
+export const businessQuery = queryOptions({
+  queryKey: ['business'],
+  queryFn: async () => {
+    let config: unknown = null;
+
+    try {
+      config = await getBusiness();
+    } catch (error) {
+      // Keep public pages renderable during a temporary Supabase/configuration outage.
+      // The error remains visible in Railway logs so the underlying issue can be diagnosed.
+      console.error('[TClean] Impossible de charger business_settings; utilisation de la configuration par défaut.', error);
+    }
+
+    const merged = config
+      ? { ...defaultConfig, ...(config as BusinessConfig) }
+      : defaultConfig;
+    const legacyLogo = '/src/assets/tclean-logo.png';
+
+    return {
+      ...merged,
+      heroPhoto: merged.heroPhoto === salon ? defaultConfig.heroPhoto : merged.heroPhoto,
+      logo: !merged.logo || merged.logo === legacyLogo ? defaultConfig.logo : merged.logo,
+      images: {
+        ...merged.images,
+        ...(merged.images[legacyLogo] ? { [defaultConfig.logo]: merged.images[legacyLogo] } : {}),
+      },
+    };
+  },
+  staleTime: 30000,
+});
+
+export function pageHead(
+  config: BusinessConfig,
+  title: string,
+  description: string,
+  path: string,
+  noindex = false,
+) {
+  const personalize = (value: string) =>
+    value
+      .replaceAll('TClean', config.name)
+      .replaceAll('Strasbourg', config.city ?? 'Strasbourg')
+      .replaceAll('06 77 69 50 79', config.phone ?? '06 77 69 50 79');
+
+  title = personalize(title);
+  description = personalize(description);
+
+  return {
+    meta: [
+      { title: `${title} | ${config.name}` },
+      { name: 'description', content: description },
+      { property: 'og:title', content: `${title} | ${config.name}` },
+      { property: 'og:description', content: description },
+      { property: 'og:type', content: 'website' },
+      { property: 'og:url', content: path },
+      { name: 'twitter:card', content: 'summary_large_image' },
+      ...(config.searchConsoleVerification
+        ? [{ name: 'google-site-verification', content: config.searchConsoleVerification }]
+        : []),
+      ...(noindex ? [{ name: 'robots', content: 'noindex,nofollow' }] : []),
+    ],
+    links: [{ rel: 'canonical', href: path }],
+  };
+}

@@ -1,0 +1,4 @@
+import { createFileRoute } from '@tanstack/react-router';
+import { Home } from '@/components/tclean/home';
+import { businessQuery,pageHead } from '@/lib/business-query';
+export const Route=createFileRoute('/')({loader:({context})=>context.queryClient.ensureQueryData(businessQuery),head:({loaderData})=>loaderData?{...pageHead(loaderData,`Nettoyage de canapé à ${loaderData.city}`,`${loaderData.name} nettoie vos canapés, fauteuils et matelas à domicile à ${loaderData.city} et ses alentours. Devis gratuit : ${loaderData.phone}.`,'/'),scripts:[{type:'application/ld+json',children:JSON.stringify({'@context':'https://schema.org','@type':'LocalBusiness',name:loaderData.name,telephone:loaderData.phone,description:'Nettoyage professionnel de canapés et textiles d’ameublement à domicile.',areaServed:loaderData.city,knowsAbout:loaderData.services.filter(s=>s.enabled).map(s=>s.name)})}]}:{meta:[{title:'TClean — Nettoyage à domicile'}]},component:Home});
