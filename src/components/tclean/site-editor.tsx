@@ -238,7 +238,7 @@ export function SiteEditor() {
     };
   }, []);
 
-  const hidden =  const hidden = (c.hidden ?? {}) as Record<string, string>;
+  const hidden = (c.hidden ?? {}) as Record<string, string>;
   const permanentHidden = (c.permanentHidden ?? {}) as Record<string, boolean>;
   const allHidden = { ...hidden, ...permanentHidden };
 
