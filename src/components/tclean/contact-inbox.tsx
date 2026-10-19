@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { Send, Search, Plus, MessageCircle, Paperclip, ShieldCheck, X, Clock3, Trash2, Sparkles } from "lucide-react";
@@ -265,52 +266,13 @@ export function ContactInbox() {
     };
   }, [signedIn]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // CORRECTION : enregistrer le callback Presence avant subscribe().
+  // Présence de l'administrateur : canal partagé géré en bas de ce fichier.
   useEffect(() => {
     if (!signedIn) {
       setAdminOnline(false);
       return;
     }
-
-    let alive = true;
-
-    const channel = supabase.channel("tclean-admin-presence", {
-      config: {
-        presence: {
-          key: "admin-viewer",
-        },
-      },
-    });
-
-    const updatePresence = () => {
-      if (!alive) return;
-
-      const state = channel.presenceState<{
-        role?: string;
-        online?: boolean;
-      }>();
-
-      const isOnline = Object.values(state)
-        .flat()
-        .some((presence) => presence.role === "admin" && presence.online === true);
-
-      setAdminOnline(isOnline);
-    };
-
-    // Tous les callbacks sont enregistrés avant l'abonnement.
-    channel.on("presence", { event: "sync" }, updatePresence);
-
-    channel.subscribe((status) => {
-      if (status === "SUBSCRIBED") {
-        updatePresence();
-      }
-    });
-
-    return () => {
-      alive = false;
-      void supabase.removeChannel(channel);
-      setAdminOnline(false);
-    };
+    return subscribeAdminPresence(setAdminOnline);
   }, [signedIn]);
 
   useEffect(() => {
@@ -916,4 +878,97 @@ export function ContactInbox() {
       </div>
     </section>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Présence de l'administrateur : un seul canal partagé par toute l'application.
+// ---------------------------------------------------------------------------
+const TOPIC = "tclean-admin-presence";
+const PRESENCE_KEY = "admin-viewer";
+
+type PresencePayload = { role?: string; online?: boolean; at?: string };
+type Listener = (adminOnline: boolean) => void;
+
+let channel: RealtimeChannel | null = null;
+let joined = false;
+let users = 0;
+let adminTracking = false;
+const listeners = new Set<Listener>();
+
+function computeAdminOnline(ch: RealtimeChannel): boolean {
+  const state = ch.presenceState<PresencePayload>();
+  return Object.values(state)
+    .flat()
+    .some((presence) => presence.role === "admin" && presence.online === true);
+}
+
+function emit() {
+  if (!channel) return;
+  const online = computeAdminOnline(channel);
+  listeners.forEach((listener) => listener(online));
+}
+
+function trackAdmin() {
+  if (!channel || !joined || !adminTracking) return;
+  void channel
+    .track({
+      role: "admin",
+      online: document.visibilityState === "visible",
+      at: new Date().toISOString(),
+    })
+    .catch(() => {});
+}
+
+function acquire() {
+  users += 1;
+  if (channel) return;
+
+  // Tous les callbacks sont enregistrés AVANT subscribe().
+  const ch = supabase.channel(TOPIC, { config: { presence: { key: PRESENCE_KEY } } });
+  ch.on("presence", { event: "sync" }, emit);
+  ch.subscribe((status) => {
+    if (status === "SUBSCRIBED") {
+      joined = true;
+      trackAdmin();
+      emit();
+    }
+  });
+  channel = ch;
+}
+
+function release() {
+  users = Math.max(0, users - 1);
+  if (users > 0 || !channel) return;
+  const ch = channel;
+  channel = null;
+  joined = false;
+  void supabase.removeChannel(ch);
+}
+
+/** Écoute si un administrateur est en ligne (utilisé par la messagerie). */
+export function subscribeAdminPresence(listener: Listener): () => void {
+  listeners.add(listener);
+  acquire();
+  listener(channel !== null && joined && computeAdminOnline(channel));
+  return () => {
+    listeners.delete(listener);
+    release();
+  };
+}
+
+/** Signale la présence de l'administrateur connecté (utilisé par l'en-tête du site). */
+export function trackAdminPresence(): () => void {
+  adminTracking = true;
+  acquire();
+  trackAdmin();
+
+  const onVisibility = () => trackAdmin();
+  document.addEventListener("visibilitychange", onVisibility);
+
+  return () => {
+    document.removeEventListener("visibilitychange", onVisibility);
+    adminTracking = false;
+    if (channel && joined) void channel.untrack().catch(() => {});
+    release();
+  };
 }
