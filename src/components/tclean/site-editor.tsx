@@ -38,7 +38,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 
-type Mode = "colors" | "typography" | "buttons" | "delete" | "permanent-delete" | "history" | "media" | "move";
+type Mode = "none" | "colors" | "typography" | "buttons" | "delete" | "permanent-delete" | "history" | "media" | "move";
 
 type Audience = "all" | "client" | "admin";
 
@@ -72,7 +72,7 @@ export function SiteEditor() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [mode, setMode] = useState<Mode>("colors");
+  const [mode, setMode] = useState<Mode>("none");
   const [audience, setAudience] = useState<Audience>("all");
   const [deviceView, setDeviceView] = useState<DeviceView>("desktop");
 
@@ -464,6 +464,7 @@ export function SiteEditor() {
 
   // Label de l'application active pour le badge réduit
   const activeLabelMap: Record<Mode, string> = {
+    none: "Aucun outil",
     colors: colorTarget === "theme" ? "Thème site" : "Couleurs",
     typography: "Textes & photos",
     buttons: "Redirections",
