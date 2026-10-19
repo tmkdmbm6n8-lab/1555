@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useSuspenseQuery, useQuery } from "@tanstack/react-query";
+import { useSuspenseQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Phone,
   Menu,
@@ -98,6 +98,26 @@ export function SiteShell({ children }: { children: ReactNode }) {
     if (!isAdmin) return;
     return trackAdminPresence();
   }, [isAdmin, userId]);
+
+  // Mise à jour instantanée : dès qu'un réglage du site change en base, tous les visiteurs
+  // ouverts rechargent la configuration sans attendre.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const channel = supabase
+      .channel("public-business-settings")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "business_settings" },
+        () => {
+          void queryClient.invalidateQueries({ queryKey: ["business"] });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
 
   const logout = async () => {
     setOpen(false);
