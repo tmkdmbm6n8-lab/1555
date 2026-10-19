@@ -10,7 +10,7 @@ import { checkDiscount, getClientData, getSlots, profileComplete, submitRequest 
 import { ACCOUNT_DISCOUNT, PROFILE_DISCOUNT, applyDiscount, totalPercent } from '@/lib/discounts';
 import { supabase } from '@/integrations/supabase/client';
 import { paymentsConfigured } from '@/lib/stripe';
-import { geocodeAddress, haversineKm } from '@/lib/travel-distance';
+import { geocodeAddress, haversineKm } from '@/lib/configurator';
 import { RequestCheckout } from './checkout';
 import { armLabels, availableTypes, colors, defaultConfiguration, fabrics, forType, furnitureTypes, priceConfiguration, soilLabels, summarize, typeInfo, type Configuration } from '@/lib/configurator';
 import { FurniturePhoto } from './furniture-photo';
