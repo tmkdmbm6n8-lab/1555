@@ -17,6 +17,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { businessQuery } from "@/lib/business-query";
 import { telephone } from "@/lib/business";
+import { siteColorCss, type ElementColors } from "@/lib/site-colors";
+import { HIDEABLE, hideKey } from "@/lib/editor-history";
 import { useReviewRedirect, useUnread, trackAdminPresence } from "./contact-inbox";
 import { SeasonalTheme, SeasonalLogoHat } from "./seasonal-theme";
 
@@ -142,6 +144,74 @@ export function SiteShell({ children }: { children: ReactNode }) {
       )}
     </>
   );
+
+  // Réglages enregistrés depuis le mode édition, appliqués aux visiteurs
+  const cfg = config as unknown as Record<string, Record<string, string> | undefined>;
+  const siteColorStyle = siteColorCss(
+    (config.themeColors ?? {}) as Record<string, string>,
+    (config.elementColors ?? {}) as Record<string, ElementColors>,
+    pathname,
+  );
+
+  useEffect(() => {
+    const hiddenMap = cfg.hidden ?? {};
+    const audienceMap = cfg.audience ?? {};
+    const linkMap = cfg.links ?? {};
+    const editorSelector = ".tc-site-editor-phone, .tc-phone-floating-pill, .tc-device-simulator-overlay, .tc-typography-toolbar, .tc-color-editor-modal";
+
+    const applyHidden = () => {
+      document.querySelectorAll<HTMLElement>(HIDEABLE).forEach((el) => {
+        if (el.closest(editorSelector)) return;
+        const key = hideKey(el);
+        let hide = false;
+        if (key && hiddenMap[key] !== undefined) {
+          const audience = audienceMap[`hide:${key}`] ?? "all";
+          hide = audience === "all" || (audience === "client" && !isAdmin) || (audience === "admin" && isAdmin);
+        }
+        if (hide) {
+          el.style.setProperty("display", "none", "important");
+          el.dataset.tcHidden = "1";
+        } else if (el.dataset.tcHidden) {
+          el.style.removeProperty("display");
+          delete el.dataset.tcHidden;
+        }
+      });
+    };
+
+    const applyLinks = () => {
+      document.querySelectorAll<HTMLElement>("a, button").forEach((btn) => {
+        if (btn.closest(editorSelector)) return;
+        const originalHref = btn.tagName === "A" ? (btn.getAttribute("href") ?? "") : "";
+        const label = (btn.textContent ?? "").trim().slice(0, 50) || "Bouton sans texte";
+        const target = linkMap[`${label}|${originalHref}`];
+        if (target) btn.dataset.tcTarget = target;
+        else delete btn.dataset.tcTarget;
+      });
+    };
+
+    const onClick = (event: MouseEvent) => {
+      if (document.querySelector(".tc-site-editor-phone")) return;
+      const el = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-tc-target]") : null;
+      if (!el?.dataset.tcTarget) return;
+      event.preventDefault();
+      event.stopPropagation();
+      navigate({ to: el.dataset.tcTarget as "/" });
+    };
+
+    const applyAll = () => {
+      applyHidden();
+      applyLinks();
+    };
+
+    applyAll();
+    const observer = new MutationObserver(applyAll);
+    observer.observe(document.body, { childList: true, subtree: true });
+    document.addEventListener("click", onClick, true);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [config, isAdmin, pathname, navigate]);
 
   return (
     <>
@@ -282,6 +352,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
         )}
       </header>
 
+      {siteColorStyle && <style>{siteColorStyle}</style>}
       <main>{children}</main>
 
       <section className="cta-band">
