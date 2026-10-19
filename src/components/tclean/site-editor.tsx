@@ -156,36 +156,75 @@ export function SiteEditor() {
     let currentUserId: string | null = null;
 
     const checkAdminRole = async (userId: string) => {
-      const res = await supabase.rpc("has_role", {
-        _user_id: userId,
-        _role: "admin",
-      });
+      try {
+        const { data, error } = await supabase.rpc("has_role", {
+          _user_id: userId,
+          _role: "admin",
+        });
 
-      if (alive && currentUserId === userId) {
-        setIsAdmin(!res.error && res.data === true);
+        if (!alive || currentUserId !== userId) return;
+
+        if (error) {
+          console.error("Vérification du rôle administrateur impossible :", error);
+          setIsAdmin(false);
+          return;
+        }
+
+        setIsAdmin(data === true);
+      } catch (error) {
+        if (alive && currentUserId === userId) {
+          console.error("Erreur lors de la vérification administrateur :", error);
+          setIsAdmin(false);
+        }
       }
     };
 
-    void supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!alive) return;
-      currentUserId = session?.user.id ?? null;
-      if (!currentUserId) {
-        setIsAdmin(false);
-        return;
+    const refreshSession = async () => {
+      try {
+        const {
+          data: { session },
+          error,
+        } = await supabase.auth.getSession();
+
+        if (!alive) return;
+
+        if (error) {
+          console.error("Impossible de récupérer la session :", error);
+          currentUserId = null;
+          setIsAdmin(false);
+          return;
+        }
+
+        const userId = session?.user.id ?? null;
+        currentUserId = userId;
+
+        if (!userId) {
+          setIsAdmin(false);
+          return;
+        }
+
+        await checkAdminRole(userId);
+      } catch (error) {
+        if (alive) {
+          console.error("Erreur de session :", error);
+          setIsAdmin(false);
+        }
       }
-      void checkAdminRole(currentUserId);
-    });
+    };
+
+    void refreshSession();
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      currentUserId = session?.user.id ?? null;
-      if (!currentUserId) {
+      const userId = session?.user.id ?? null;
+      currentUserId = userId;
+
+      if (!userId) {
         setIsAdmin(false);
         return;
       }
 
-      const userId = currentUserId;
       queueMicrotask(() => {
         if (alive && currentUserId === userId) {
           void checkAdminRole(userId);
@@ -199,7 +238,7 @@ export function SiteEditor() {
     };
   }, []);
 
-  const hidden = (c.hidden ?? {}) as Record<string, string>;
+  const hidden =  const hidden = (c.hidden ?? {}) as Record<string, string>;
   const permanentHidden = (c.permanentHidden ?? {}) as Record<string, boolean>;
   const allHidden = { ...hidden, ...permanentHidden };
 
