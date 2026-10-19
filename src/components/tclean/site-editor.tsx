@@ -1,120 +1,29 @@
-import { useEffect, useState, useTransition } from "react";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { useRouterState, useNavigate } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
+import { useEffect, useState } from "react";
+import { useRouterState } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { businessQuery } from "@/lib/business-query";
-import {
-  saveSiteColor,
-  saveSiteSetting,
-  clearSiteColors,
-  updateButtonLink,
-  permanentlyDeleteHidden,
-} from "@/lib/business.functions";
-import { elementColorKey, siteColorCss, type ElementColors } from "@/lib/site-colors";
-import { HIDEABLE, hideKey, parseInfo } from "@/lib/editor-history";
-import { SiteColorEditor, readElementColors, type ColorTarget } from "./site-color-editor";
-import { EditorTypographyToolbar } from "./site-typography-toolbar";
-import {
-  Palette,
-  Type,
-  MousePointerClick,
-  Trash2,
-  ArrowUpRight,
-  Video,
-  Move,
-  Moon,
-  Sun,
-  Smartphone,
-  Tablet,
-  Monitor,
-  RotateCw,
-  Sparkles,
-  Wifi,
-  Battery,
-  X,
-  Minus,
-  ShieldAlert,
-} from "lucide-react";
-
-type Mode = "none" | "colors" | "typography" | "buttons" | "delete" | "permanent-delete" | "history" | "media" | "move";
-
-type Audience = "all" | "client" | "admin";
+import { Moon, Sun, Smartphone, Tablet, Monitor, RotateCw, Wifi, Battery, X, Minus } from "lucide-react";
 
 type DeviceView = "desktop" | "tablet" | "mobile";
 
-type PendingLink = {
-  key: string;
-  label: string;
-};
-
-type PendingMedia = {
-  key: string;
-  label: string;
-};
-
-type PendingMove = {
-  key: string;
-  label: string;
-  element: HTMLElement;
-};
-
-type OverrideData = NonNullable<Parameters<typeof saveSiteSetting>[0]>["data"];
-type ColorsData = NonNullable<Parameters<typeof saveSiteColor>[0]>["data"];
-type PermDeleteData = NonNullable<Parameters<typeof permanentlyDeleteHidden>[0]>["data"];
-type LinkData = NonNullable<Parameters<typeof updateButtonLink>[0]>["data"];
-
-// Modification mise en attente : rien n'est envoyé au serveur avant « Enregistrer »
-type PendingBody =
-  | { type: "override"; data: OverrideData }
-  | { type: "perm"; data: PermDeleteData }
-  | { type: "link"; data: LinkData }
-  | { type: "colors"; data: ColorsData };
-
-type PendingOp = PendingBody & { id: string; label: string };
-
-const PENDING_KEY = "tc-editor-pending-ops";
+// Anciennes modifications en attente de la version précédente : on les retire
+const LEGACY_KEYS = ["tc-editor-pending-ops", "tc-editor-pending-link"];
 
 export function SiteEditor() {
-  const { data: c } = useSuspenseQuery(businessQuery);
-
-  const save = useServerFn(saveSiteSetting);
-  const saveColors = useServerFn(saveSiteColor);
-  const clearColors = useServerFn(clearSiteColors);
-  const linkRedirect = useServerFn(updateButtonLink);
-  const permDelete = useServerFn(permanentlyDeleteHidden);
-
   const [isAdmin, setIsAdmin] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [mode, setMode] = useState<Mode>("none");
-  const [audience, setAudience] = useState<Audience>("all");
   const [deviceView, setDeviceView] = useState<DeviceView>("desktop");
-
   const [darkMode, setDarkMode] = useState(false);
   const [timeStr, setTimeStr] = useState("12:00");
-
-  const [pending, setPending] = useState<PendingLink | null>(null);
-  const [mediaPending, setMediaPending] = useState<PendingMedia | null>(null);
-  const [mediaUrl, setMediaUrl] = useState("");
-  const [mediaLayer, setMediaLayer] = useState<"behind" | "above" | "front">("behind");
-  const [mediaOpacity, setMediaOpacity] = useState(1);
-
-  const [movePending, setMovePending] = useState<PendingMove | null>(null);
-  const [moveX, setMoveX] = useState(0);
-  const [moveY, setMoveY] = useState(0);
-  const [moveAlign, setMoveAlign] = useState<"left" | "center" | "right">("center");
-
-  const [colorTarget, setColorTarget] = useState<ColorTarget | "theme" | null>(null);
-  const [pendingOps, setPendingOps] = useState<PendingOp[]>([]);
-  const [isPending, startTransition] = useTransition();
 
   const pathname = useRouterState({
     select: (s) => s.location.pathname,
   });
 
-  const navigate = useNavigate();
+  useEffect(() => {
+    LEGACY_KEYS.forEach((key) => window.sessionStorage.removeItem(key));
+  }, []);
 
   // Heure dynamique dans la barre d'état du smartphone
   useEffect(() => {
@@ -255,298 +164,15 @@ export function SiteEditor() {
     };
   }, []);
 
-  const hidden = (c.hidden ?? {}) as Record<string, string>;
-  const permanentHidden = (c.permanentHidden ?? {}) as Record<string, boolean>;
-  const allHidden = { ...hidden, ...permanentHidden };
-
-  useEffect(() => {
-    if (!enabled) {
-      setPending(null);
-      setMediaPending(null);
-      setMovePending(null);
-      setColorTarget(null);
-      return;
-    }
-
-    const stored = window.sessionStorage.getItem("tc-editor-pending-link");
-
-    if (stored) {
-      try {
-        setPending(JSON.parse(stored) as PendingLink);
-      } catch {
-        // Ignore invalid stored data.
-      }
-    }
-  }, [enabled]);
-
-  const choosePending = (next: PendingLink | null) => {
-    setPending(next);
-
-    if (next) {
-      window.sessionStorage.setItem("tc-editor-pending-link", JSON.stringify(next));
-    } else {
-      window.sessionStorage.removeItem("tc-editor-pending-link");
-    }
-  };
-
-  const clickable = (el: Element): HTMLAnchorElement | HTMLButtonElement | null => {
-    const a = el.closest("a");
-    if (a) return a;
-    const b = el.closest("button");
-    if (b) return b;
-    return null;
-  };
-
-  useEffect(() => {
-    try {
-      const stored = window.sessionStorage.getItem(PENDING_KEY);
-      if (stored) setPendingOps(JSON.parse(stored) as PendingOp[]);
-    } catch {
-      // Ignore invalid stored data.
-    }
-  }, []);
-
-  const writePending = (next: PendingOp[]) => {
-    setPendingOps(next);
-    if (next.length > 0) window.sessionStorage.setItem(PENDING_KEY, JSON.stringify(next));
-    else window.sessionStorage.removeItem(PENDING_KEY);
-  };
-
-  const stage = (label: string, body: PendingBody) => {
-    writePending([...pendingOps, { ...body, id: crypto.randomUUID(), label }]);
-  };
-
-  const applyOp = (op: PendingOp) => {
-    switch (op.type) {
-      case "override":
-        return save({ data: op.data });
-      case "perm":
-        return permDelete({ data: op.data });
-      case "link":
-        return linkRedirect({ data: op.data });
-      case "colors":
-        return saveColors({ data: op.data });
-    }
-  };
-
-  const saveAll = () => {
-    startTransition(async () => {
-      let remaining = [...pendingOps];
-      try {
-        while (remaining.length > 0) {
-          await applyOp(remaining[0]);
-          remaining = remaining.slice(1);
-          writePending(remaining);
-        }
-        toast.success("Modifications enregistrées pour tout le monde.");
-        navigate({ reloadDocument: true });
-      } catch (e) {
-        toast.error((e as Error).message || "Erreur d'enregistrement");
-      }
-    });
-  };
-
-  const discardAll = () => {
-    writePending([]);
-    navigate({ reloadDocument: true });
-  };
-
-  const mediaKey = (el: HTMLElement): string => {
-    const id = el.id ? `#${el.id}` : "";
-    const testId = el.getAttribute("data-testid") ? `[data-testid="${el.getAttribute("data-testid")}"]` : "";
-    const aria = el.getAttribute("aria-label") ? `[aria-label="${el.getAttribute("aria-label")}"]` : "";
-    const tag = el.tagName.toLowerCase();
-    const textSnippet = (el.textContent ?? "").trim().slice(0, 30).replace(/\s+/g, " ");
-
-    return `${pathname}::${tag}${id}${testId}${aria}::${textSnippet}`;
-  };
-
-  useEffect(() => {
-    if (!enabled) return;
-
-    const onClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-
-      if (!target) return;
-
-      if (
-        target.closest(".tc-site-editor-phone") ||
-        target.closest(".tc-phone-floating-pill") ||
-        target.closest(".tc-device-simulator-overlay") ||
-        target.closest(".tc-typography-toolbar") ||
-        target.closest(".tc-color-editor-modal")
-      ) {
-        return;
-      }
-
-      if (mode === "colors") {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const el = (target.closest(
-          "header, nav, footer, section, main, article, aside, .tc-colorable, [data-tc-colorable]",
-        ) ?? target) as HTMLElement;
-
-        const key = elementColorKey(el, pathname);
-        if (!key) {
-          toast.error("Impossible d'identifier cet élément pour modifier ses couleurs.");
-          return;
-        }
-
-        const label = (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 60) || el.tagName.toLowerCase();
-
-        setColorTarget({
-          key,
-          label,
-          initial: readElementColors(el),
-        });
-
-        return;
-      }
-
-      if (mode === "delete" || mode === "permanent-delete") {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const el = target.closest(HIDEABLE) as HTMLElement | null;
-
-        if (!el) {
-          toast.error("Cliquez sur un bouton, un titre, un texte ou une image");
-          return;
-        }
-
-        const key = hideKey(el);
-
-        if (!key) {
-          toast.error("Impossible d'identifier cet élément");
-          return;
-        }
-
-        const label = (el.textContent ?? "").trim().slice(0, 40) || el.tagName.toLowerCase();
-
-        if (mode === "permanent-delete") {
-          stage(`Suppression définitive — ${label}`, { type: "perm", data: { key } });
-          toast.success(`Élément « ${label} » ajouté aux modifications en attente`);
-          return;
-        }
-
-        stage(`Masquer — ${label}`, {
-          type: "override",
-          data: {
-            kind: "hide",
-            key,
-            value: JSON.stringify({
-              label,
-              page: pathname,
-              at: new Date().toISOString(),
-              audience,
-            }),
-            audience,
-          },
-        });
-        el.style.setProperty("display", "none", "important");
-
-        toast.success(`Élément masqué en attente (${audience === "all" ? "tout le monde" : audience})`);
-        return;
-      }
-
-      if (mode === "buttons") {
-        const btn = clickable(target);
-
-        if (!btn) return;
-
-        e.preventDefault();
-        e.stopPropagation();
-
-        const originalHref = btn.tagName.toLowerCase() === "a" ? (btn as HTMLAnchorElement).getAttribute("href") : "";
-        const label = (btn.textContent ?? "").trim().slice(0, 50) || "Bouton sans texte";
-        const key = `${label}|${originalHref ?? ""}`;
-
-        choosePending({ key, label });
-        toast.info(`Bouton sélectionné : « ${label} ». Naviguez vers la page de destination.`);
-        return;
-      }
-
-      const el = target.closest("h1, h2, h3, h4, p, span, div, section, img, video") as HTMLElement | null;
-
-      if (!el) return;
-
-      if (mode === "media") {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const key = mediaKey(el);
-
-        setMediaPending({
-          key,
-          label: (el.textContent ?? "").trim().slice(0, 50) || el.tagName.toLowerCase(),
-        });
-
-        return;
-      }
-
-      if (mode === "move") {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const key = mediaKey(el);
-
-        setMovePending({
-          key,
-          label: (el.textContent ?? "").trim().slice(0, 50) || el.tagName.toLowerCase(),
-          element: el,
-        });
-
-        return;
-      }
-    };
-
-    document.addEventListener("click", onClick, true);
-
-    return () => {
-      document.removeEventListener("click", onClick, true);
-    };
-  }, [enabled, mode, audience, pathname, hidden, permanentHidden, allHidden, c.elementColors, stage]);
-
-  // Aperçu des couleurs en attente (sans les enregistrer)
-  const stagedColorCss = (() => {
-    let theme = { ...(c.themeColors ?? {}) } as Record<string, string>;
-    const elements = { ...(c.elementColors ?? {}) } as Record<string, ElementColors>;
-    let touched = false;
-    for (const op of pendingOps) {
-      if (op.type !== "colors") continue;
-      touched = true;
-      if (op.data.kind === "theme") theme = { ...(op.data.colors as Record<string, string>) };
-      else if (op.data.colors === null) delete elements[op.data.key];
-      else elements[op.data.key] = op.data.colors;
-    }
-    return touched ? siteColorCss(theme, elements, pathname) : "";
-  })();
-
   // Si on est à l'intérieur de l'iframe de simulation ou si l'utilisateur n'est pas admin, on n'affiche rien
   const isInsideIframe = typeof window !== "undefined" && window.self !== window.top;
   if (isInsideIframe || !isAdmin) {
     return null;
   }
 
-  // Label de l'application active pour le badge réduit
-  const activeLabelMap: Record<Mode, string> = {
-    none: "Aucun outil",
-    colors: colorTarget === "theme" ? "Thème site" : "Couleurs",
-    typography: "Textes & photos",
-    buttons: "Redirections",
-    delete: "Supprimer",
-    "permanent-delete": "Suppr. déf.",
-    history: "Historique",
-    media: "Médias",
-    move: "Déplacer",
-  };
-
   return (
     <>
-      {stagedColorCss && <style>{stagedColorCss}</style>}
-
-      {/* Vrai simulateur avec iframe isolée (déclenche les vrais media queries mobiles) */}
+      {/* Simulateur responsive avec iframe isolée (déclenche les vraies media queries) */}
       {enabled && deviceView !== "desktop" && (
         <aside className="tc-device-simulator-overlay" aria-label="Simulateur responsive">
           <div className="tc-simulator-topbar">
@@ -621,7 +247,7 @@ export function SiteEditor() {
             }}
           >
             <Smartphone size={16} />
-            <span>{enabled ? `Éditeur : ${activeLabelMap[mode]}` : "Mode édition"}</span>
+            <span>{enabled ? "Éditeur" : "Mode édition"}</span>
             {enabled && (
               <span
                 role="button"
@@ -639,7 +265,7 @@ export function SiteEditor() {
         </div>
       )}
 
-      {/* Interface smartphone complète de l'éditeur */}
+      {/* Interface smartphone de l'éditeur */}
       {enabled && !isMinimized && (
         <aside className="tc-site-editor-phone" aria-label="Studio d'édition TClean">
           <div className="tc-phone-body">
@@ -678,7 +304,7 @@ export function SiteEditor() {
             <div className="tc-phone-screen-header">
               <div className="tc-phone-app-title">
                 <strong>Studio TClean</strong>
-                <span>Appuyez sur un outil puis cliquez sur votre site</span>
+                <span>Aucun outil pour le moment</span>
               </div>
             </div>
 
@@ -713,129 +339,8 @@ export function SiteEditor() {
               </button>
             </div>
 
-            {/* Grille d'applications comme sur un téléphone */}
+            {/* Grille d'applications : seul le mode sombre pour l'instant */}
             <div className="tc-phone-app-grid">
-              {/* App 1: Couleurs */}
-              <button
-                type="button"
-                className={mode === "colors" && colorTarget !== "theme" ? "tc-app-item is-active" : "tc-app-item"}
-                onClick={() => {
-                  setMode("colors");
-                  setColorTarget(null);
-                }}
-              >
-                <div className="tc-app-icon gradient-purple">
-                  <Palette size={20} />
-                </div>
-                <span className="tc-app-name">Couleurs</span>
-              </button>
-
-              {/* App 2: Thème du site */}
-              <button
-                type="button"
-                className={mode === "colors" && colorTarget === "theme" ? "tc-app-item is-active" : "tc-app-item"}
-                onClick={() => {
-                  setMode("colors");
-                  setColorTarget("theme");
-                }}
-              >
-                <div className="tc-app-icon gradient-emerald">
-                  <Sparkles size={20} />
-                </div>
-                <span className="tc-app-name">Thème site</span>
-              </button>
-
-              {/* App 3: Textes & Photos */}
-              <button
-                type="button"
-                className={mode === "typography" ? "tc-app-item is-active" : "tc-app-item"}
-                onClick={() => {
-                  setMode("typography");
-                  setColorTarget(null);
-                }}
-              >
-                <div className="tc-app-icon gradient-blue">
-                  <Type size={20} />
-                </div>
-                <span className="tc-app-name">Textes</span>
-              </button>
-
-              {/* App 4: Boutons & Liens */}
-              <button
-                type="button"
-                className={mode === "buttons" ? "tc-app-item is-active" : "tc-app-item"}
-                onClick={() => {
-                  setMode("buttons");
-                  setColorTarget(null);
-                }}
-              >
-                <div className="tc-app-icon gradient-amber">
-                  <MousePointerClick size={20} />
-                </div>
-                <span className="tc-app-name">Boutons</span>
-              </button>
-
-              {/* App 5: Supprimer un élément */}
-              <button
-                type="button"
-                className={mode === "delete" ? "tc-app-item is-active" : "tc-app-item"}
-                onClick={() => {
-                  setMode("delete");
-                  setColorTarget(null);
-                }}
-              >
-                <div className="tc-app-icon gradient-red">
-                  <Trash2 size={20} />
-                </div>
-                <span className="tc-app-name">Supprimer</span>
-              </button>
-
-              {/* App 6: Corbeille / Historique */}
-              <button
-                type="button"
-                className={mode === "history" ? "tc-app-item is-active" : "tc-app-item"}
-                onClick={() => {
-                  setMode("history");
-                  setColorTarget(null);
-                }}
-              >
-                <div className="tc-app-icon gradient-slate">
-                  <ShieldAlert size={20} />
-                </div>
-                <span className="tc-app-name">Corbeille ({Object.keys(allHidden).length})</span>
-              </button>
-
-              {/* App 7: Médias & Arrière-plans */}
-              <button
-                type="button"
-                className={mode === "media" ? "tc-app-item is-active" : "tc-app-item"}
-                onClick={() => {
-                  setMode("media");
-                  setColorTarget(null);
-                }}
-              >
-                <div className="tc-app-icon gradient-indigo">
-                  <Video size={20} />
-                </div>
-                <span className="tc-app-name">Médias</span>
-              </button>
-
-              {/* App 8: Déplacer un élément */}
-              <button
-                type="button"
-                className={mode === "move" ? "tc-app-item is-active" : "tc-app-item"}
-                onClick={() => {
-                  setMode("move");
-                  setColorTarget(null);
-                }}
-              >
-                <div className="tc-app-icon gradient-cyan">
-                  <Move size={20} />
-                </div>
-                <span className="tc-app-name">Déplacer</span>
-              </button>
-
-              {/* App 9: Mode sombre / Mode clair */}
               <button
                 type="button"
                 className={darkMode ? "tc-app-item is-active" : "tc-app-item"}
@@ -848,67 +353,8 @@ export function SiteEditor() {
               </button>
             </div>
 
-            {/* Bannière de redirection en attente */}
-            {pending && (
-              <div className="tc-phone-pending-banner">
-                <div className="tc-phone-pending-copy">
-                  <span>Bouton :</span>
-                  <strong>{pending.label}</strong>
-                </div>
-                <div className="tc-phone-pending-actions">
-                  <button
-                    type="button"
-                    className="tc-phone-pending-confirm"
-                    onClick={() => {
-                      stage(`Redirection — ${pending.label}`, {
-                        type: "link",
-                        data: { key: pending.key, target: pathname },
-                      });
-                      choosePending(null);
-                    }}
-                  >
-                    <ArrowUpRight size={13} /> Rediriger vers {pathname}
-                  </button>
-                  <button type="button" className="tc-phone-pending-cancel" onClick={() => choosePending(null)}>
-                    Annuler
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Modifications en attente : publiées seulement après « Enregistrer » */}
-            {pendingOps.length > 0 && (
-              <div className="tc-phone-pending-banner">
-                <div className="tc-phone-pending-copy">
-                  <span>Modifications en attente : {pendingOps.length}</span>
-                  <strong>{pendingOps.map((op) => op.label).slice(-3).join(" · ")}</strong>
-                </div>
-                <div className="tc-phone-pending-actions">
-                  <button type="button" className="tc-phone-pending-confirm" disabled={isPending} onClick={saveAll}>
-                    {isPending ? "Enregistrement…" : "Enregistrer pour tout le monde"}
-                  </button>
-                  <button type="button" className="tc-phone-pending-cancel" disabled={isPending} onClick={discardAll}>
-                    Annuler
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Dock du smartphone : Choix de visibilité et bouton Quitter */}
+            {/* Dock du smartphone : bouton Quitter */}
             <div className="tc-phone-dock">
-              <div className="tc-phone-audience-box">
-                <label htmlFor="tc-audience-select">Visibilité :</label>
-                <select
-                  id="tc-audience-select"
-                  value={audience}
-                  onChange={(e) => setAudience(e.target.value as Audience)}
-                >
-                  <option value="all">Tout le monde</option>
-                  <option value="client">Clients & visiteurs</option>
-                  <option value="admin">Admin uniquement</option>
-                </select>
-              </div>
-
               <button
                 type="button"
                 className="tc-phone-exit-btn"
@@ -928,19 +374,6 @@ export function SiteEditor() {
             />
           </div>
         </aside>
-      )}
-
-      {/* Barres d'options secondaires */}
-      {enabled && mode === "typography" && <EditorTypographyToolbar audience={audience} />}
-
-      {enabled && mode === "colors" && colorTarget && (
-        <SiteColorEditor
-          config={c}
-          pathname={pathname}
-          target={colorTarget}
-          onClose={() => setColorTarget(null)}
-          onStage={(data, label) => stage(label, { type: "colors", data })}
-        />
       )}
     </>
   );
