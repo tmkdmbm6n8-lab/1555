@@ -15,7 +15,6 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { SiteShell } from '@/components/tclean/site-shell';
 import { businessQuery } from '@/lib/business-query';
 import { Toaster } from '@/components/ui/sonner';
-import { SiteEditor } from '@/components/tclean/site-editor';
 
 function NotFoundComponent() {
   return (
@@ -123,7 +122,6 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <SiteShell><Outlet /></SiteShell>
-      <SiteEditor />
       <Toaster />
     </QueryClientProvider>
   );
