@@ -31,7 +31,7 @@ export const businessQuery = queryOptions({
       },
     };
   },
-  staleTime: 30000,
+  staleTime: 0,
 });
 
 export function pageHead(
